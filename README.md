@@ -30,3 +30,4 @@ Automatically analyzes GitHub Actions failures using Claude and posts a root-cau
 > **Prevention:** Add a type-check lint rule or property-based tests for arithmetic helpers.
 # trigger
 # trigger
+.
