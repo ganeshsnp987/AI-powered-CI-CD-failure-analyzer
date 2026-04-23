@@ -1,7 +1,6 @@
-
 #!/usr/bin/env python3
 """
-CI Failure Analyzer - reads log from stdin, sends to Claude, prints analysis.
+CI Failure Analyzer - reads log from stdin, sends to Gemini, prints analysis.
 """
 import sys
 import os
@@ -10,9 +9,9 @@ import urllib.request
 import urllib.error
 
 def analyze_failure(log_text: str) -> str:
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    api_key = os.environ.get("GEMINI_API_KEY", "")
     if not api_key:
-        return "ERROR: ANTHROPIC_API_KEY not set."
+        return "ERROR: GEMINI_API_KEY not set."
 
     prompt = f"""You are a senior DevOps engineer reviewing a CI/CD failure log.
 
@@ -30,25 +29,21 @@ Keep your analysis under 300 words. Be direct, no fluff.
 --- FAILURE LOG END ---"""
 
     payload = json.dumps({
-        "model": "claude-3-5-sonnet-20241022",
-        "max_tokens": 1024,
-        "messages": [{"role": "user", "content": prompt}]
+        "contents": [{"parts": [{"text": prompt}]}]
     }).encode("utf-8")
 
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+
     req = urllib.request.Request(
-        "https://api.anthropic.com/v1/messages",
+        url,
         data=payload,
-        headers={
-            "Content-Type": "application/json",
-            "x-api-key": api_key,
-            "anthropic-version": "2023-06-01"
-        }
+        headers={"Content-Type": "application/json"}
     )
 
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             data = json.loads(resp.read())
-            return data["content"][0]["text"]
+            return data["candidates"][0]["content"]["parts"][0]["text"]
     except urllib.error.HTTPError as e:
         return f"API error {e.code}: {e.read().decode()}"
     except Exception as e:
