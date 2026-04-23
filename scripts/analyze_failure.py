@@ -30,7 +30,7 @@ Keep your analysis under 300 words. Be direct, no fluff.
 --- FAILURE LOG END ---"""
 
     payload = json.dumps({
-        "model": "claude-sonnet-4-20250514",
+        "model": "claude-3-5-sonnet-20241022",
         "max_tokens": 1024,
         "messages": [{"role": "user", "content": prompt}]
     }).encode("utf-8")
