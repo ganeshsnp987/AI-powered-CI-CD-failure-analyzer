@@ -1,0 +1,97 @@
+name: Analyze CI Failure
+
+on:
+  workflow_run:
+    workflows: ["CI Pipeline"]
+    types: [completed]
+
+jobs:
+  analyze:
+    if: ${{ github.event.workflow_run.conclusion == 'failure' }}
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      actions: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Fetch failed job logs
+        id: fetch_logs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Get the failed job ID
+          JOB_ID=$(curl -s -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/$REPO/actions/runs/$RUN_ID/jobs" \
+            | python3 -c "
+          import sys, json
+          jobs = json.load(sys.stdin)['jobs']
+          failed = [j for j in jobs if j['conclusion'] == 'failure']
+          print(failed[0]['id'] if failed else '')
+          ")
+
+          if [ -z "$JOB_ID" ]; then
+            echo "No failed job found."
+            exit 1
+          fi
+
+          # Fetch the log for that job
+          curl -s -L -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/$REPO/actions/jobs/$JOB_ID/logs" \
+            -o /tmp/ci_failure.log
+
+          echo "job_id=$JOB_ID" >> $GITHUB_OUTPUT
+
+      - name: Analyze with Claude
+        id: analyze
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          ANALYSIS=$(python3 scripts/analyze_failure.py < /tmp/ci_failure.log)
+          # Write to file to safely pass multiline output
+          echo "$ANALYSIS" > /tmp/analysis.txt
+
+      - name: Post PR comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          # Find the PR associated with the triggering workflow run
+          PR_NUMBER=$(curl -s -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/$REPO/actions/runs/$RUN_ID" \
+            | python3 -c "
+          import sys, json
+          data = json.load(sys.stdin)
+          prs = data.get('pull_requests', [])
+          print(prs[0]['number'] if prs else '')
+          ")
+
+          ANALYSIS=$(cat /tmp/analysis.txt)
+          BODY="## 🤖 CI Failure Analysis
+
+          $ANALYSIS
+
+          ---
+          *Analyzed by [ci-failure-analyzer](https://github.com/$REPO) using Claude*"
+
+          if [ -n "$PR_NUMBER" ]; then
+            curl -s -X POST \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Content-Type: application/json" \
+              "https://api.github.com/repos/$REPO/issues/$PR_NUMBER/comments" \
+              -d "$(python3 -c "import json,sys; print(json.dumps({'body': sys.stdin.read()}))" <<< "$BODY")"
+            echo "Posted comment on PR #$PR_NUMBER"
+          else
+            # Fallback: write to job summary
+            echo "$BODY" >> $GITHUB_STEP_SUMMARY
+            echo "No PR found — written to job summary."
+          fi
