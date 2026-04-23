@@ -28,3 +28,4 @@ Automatically analyzes GitHub Actions failures using Gemini and posts a root-cau
 > **Failed step:** Run tests  
 > **Fix:** Change `return a - b` to `return a + b` in `tests/test_app.py`  
 > **Prevention:** Add a type-check lint rule or property-based tests for arithmetic helpers.
+.
